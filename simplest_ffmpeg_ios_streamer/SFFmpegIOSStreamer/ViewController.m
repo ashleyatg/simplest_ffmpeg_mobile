@@ -19,6 +19,10 @@
 #include <libavutil/mathematics.h>
 #include <libavutil/time.h>
 
+int64_t pts_adjustment = 0;
+int loop_2 = 0;
+int64_t last_pts = 0;
+
 @interface ViewController ()
 
 @end
@@ -135,14 +139,30 @@
         printf( "Error occurred when opening output URL\n");
         goto end;
     }
-    
+
+
+start:
     start_time=av_gettime();
+    if(loop_2)
+        pts_adjustment = last_pts;
+    
+    for(int i = 0; i < ifmt_ctx->nb_streams; i++)
+    {
+        ret = avformat_seek_file(ifmt_ctx, i, 0, 0, 0, 0);
+        printf("Result = %d for stream %d \n", ret, i);
+    }
+    
+
     while (1) {
         AVStream *in_stream, *out_stream;
         //Get an AVPacket
         ret = av_read_frame(ifmt_ctx, &pkt);
-        if (ret < 0)
+        if (ret < 0) {
+            loop_2 = 1;
+            goto start;
             break;
+        }
+        
         //FIX：No PTS (Example: Raw H.264)
         //Simple Write PTS
         if(pkt.pts==AV_NOPTS_VALUE){
@@ -170,8 +190,9 @@
         out_stream = ofmt_ctx->streams[pkt.stream_index];
         /* copy packet */
         //Convert PTS/DTS
-        pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
-        pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
+        pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX))+pts_adjustment;
+        pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX))+pts_adjustment;
+        last_pts = pkt.dts;
         pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
         pkt.pos = -1;
         //Print to Screen
@@ -187,6 +208,7 @@
             break;
         }
         
+
         av_free_packet(&pkt);
         
     }
